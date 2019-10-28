@@ -1834,6 +1834,67 @@ ngx_http_auth_ldap_handler(ngx_http_request_t *r)
     return ngx_http_auth_ldap_authenticate(r, ctx, alcf);
 }
 
+ngx_int_t
+ngx_http_auth_ldap_header(ngx_http_request_t *r, ngx_http_auth_ldap_ctx_t *ctx, u_char *key)
+{
+    ngx_table_elt_t *h;
+    ngx_list_part_t *part;
+    ngx_uint_t i;
+    ngx_flag_t matched = 0;
+
+    part = &r->headers_out.headers.part;
+    h = part->elts;
+    for (i = 0; /* void */; i++)
+    {
+        if (i >= part->nelts)
+        {
+            if (part->next == NULL)
+            {
+                break;
+            }
+            part = part->next;
+            h = part->elts;
+            i = 0;
+        }
+        if (ngx_strcasecmp(h[i].key.data, (u_char *)key) == 0)
+        {
+            h[i].key.len = ngx_strlen(key);
+            h[i].key.data = key;
+            h[i].lowcase_key = ngx_pnalloc(r->pool, h[i].key.len);
+            if (h[i].lowcase_key == NULL)
+            {
+                return NGX_ERROR;
+            }
+            ngx_strlow(h[i].lowcase_key, h[i].key.data, h[i].key.len);
+            h[i].value = ctx->user_dn;
+            h[i].hash = 1;
+            matched = 1;
+        }
+    }
+
+    if (matched)
+    {
+        return NGX_OK;
+    }
+
+    h = ngx_list_push(&r->headers_out.headers);
+    if (h == NULL)
+    {
+        return NGX_ERROR;
+    }
+
+    h->key.len = ngx_strlen(key);
+    h->key.data = key;
+    h->lowcase_key = ngx_pnalloc(r->pool, h->key.len);
+    if (h->lowcase_key == NULL)
+    {
+        return NGX_ERROR;
+    }
+    ngx_strlow(h->lowcase_key, h->key.data, h->key.len);
+    h->value = ctx->user_dn;
+    h->hash = 1;
+    return NGX_OK;
+}
 /**
  * Iteratively handle all phases of the authentication process, might be called many times
  */
@@ -1934,7 +1995,7 @@ ngx_http_auth_ldap_authenticate(ngx_http_request_t *r, ngx_http_auth_ldap_ctx_t 
             case PHASE_CHECK_USER:
                 ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "http_auth_ldap: User DN is \"%V\"",
                     &ctx->user_dn);
-
+                ngx_http_auth_ldap_header(r, ctx, (u_char *) "x-http-auth-ldap-dn");
                 if (ctx->server->require_user != NULL) {
                     rc = ngx_http_auth_ldap_check_user(r, ctx);
                     if (rc != NGX_OK) {
